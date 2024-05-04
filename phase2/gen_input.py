@@ -59,7 +59,7 @@ def write_input(filename, expfilename, prev_state, prev_misc_state, actions, deg
                 captures, actions_captures) :
     phase2_exponent = impairer(num2bits(random.randint(0,modulo_courbe - 1)))
     phase1_received_file = open('../calculs/phase1/output.txt')
-    phase1_received = [i.split() for i in phase1_received_file.readlines()][100:]
+    phase1_received = [i.split() for i in phase1_received_file.readlines()][state_size:]
     phase1_received_file.close()
     input_dict = {
             "prev_state": prev_state,

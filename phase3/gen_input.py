@@ -69,11 +69,11 @@ def yeet(num):
 
 def write_input(filename) :
     hashed_idents_file = open('../phase1/output.txt')
-    hashed_idents = [i.split() for i in hashed_idents_file.readlines()][:100]
+    hashed_idents = [i.split() for i in hashed_idents_file.readlines()][:state_size]
     hashed_idents_file.close()
     phase2_file = open('../../psi-wesnoth/output.txt')
     phase2 = phase2_file.readlines()
-    phase2_raw = [[num2bits(j) for j in i.split()] for i in phase2[200:]]
+    phase2_raw = [[num2bits(j) for j in i.split()] for i in phase2[2 * state_size:]]
     """
     phase1_exponents_file = open('../phase1/expstart.json')
     print([bits2num(i) for i in json.load(phase1_exponents_file)])
@@ -89,8 +89,8 @@ def write_input(filename) :
     input_dict = {
             "hashed_idents" : hashed_idents,
             "inv_phase1_exponents": [yeet(mod_inv(bits2num(i), modulo_courbe)) for i in json.load(phase1_exponents_file)],
-            "phase2_dh_output": [i.split() for i in phase2[:100]],
-            "phase2_hidden_tags": [i.split() for i in phase2[100:200]],
+            "phase2_dh_output": [i.split() for i in phase2[:state_size]],
+            "phase2_hidden_tags": [i.split() for i in phase2[state_size:2 * state_size]],
             "phase2_hidden_data": phase2_raw
             }
 
