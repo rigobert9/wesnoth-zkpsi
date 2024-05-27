@@ -135,6 +135,13 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   var max_radius = tabmax(nb_troupes, range_troupes);
   // La troupe 1 correspond au chef
 
+  // Les deux entrées sont
+  // - le hash de l'état actuel
+  // - la chaîne actuelle
+  // TODO: CHOISIR TAILLE MIMC !
+  signal input step_in[2 * mimc_hash_size];
+  signal output step_out[2 * mimc_hash_size];
+
   /* Entrées qui seront privées
   * Chaque case contient les informations suivantes :
   * [type_unite, HP, état_village, range_restante]
@@ -142,13 +149,20 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   * [argent_possede, villages_possédés, upkeep_accumulé] */
   signal input prev_state[state_size][4];
   signal input prev_misc_state[3];
-  // Actions adverses
-  signal input degats[state_size];
-  signal input captures[nb_villages];
   // 10 actions avec l'encodage
   // Le batching d'actions est fait dans ce prototype, à voir s'il est conservé
   // dans l'un ou l'autre des jeux
   signal input actions[actions_size][8];
+  // En binaire, inversibles de l'ordre de la courbe
+  signal input phase1_exponents[state_size][254];
+  signal input phase2_exponent[254];
+
+  /* Entrées publiques, qui sont accumulées dans la chaîne */
+  // Actions adverses
+  signal input degats[state_size];
+  signal input captures[nb_villages];
+  /* Entrées adverses publiques */
+  signal input phase1_received[state_size][2]; // Points
   /* On peut faire confiance aux joueurs pour énoncer les villages possédés par
    * l'adversaire qu'ils capturent : en effet, s'ils l'énoncent alors que
    * l'adversaire ne l'a pas, il font fuir de l'information; s'ils ne l'énoncent
@@ -156,24 +170,25 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
    * ce village.*/
    // On doit donc vérifier que les éléments de ce tableau sont bien capturés
   signal input actions_captures[nb_villages];
-  // En binaire, inversibles de l'ordre de la courbe
-  signal input phase1_exponents[state_size][254];
-  signal input phase2_exponent[254];
-
-  /* Entrées adverses publiques */
-  signal input phase1_received[state_size][2]; // Points
-
-  /* Sorties contre lesquelles sont mesurées les résultats */
-  // TODO: CHOISIR TAILLE MIMC !
-  signal output prev_hash[mimc_hash_size]; // Hash MiMCSponge
-  signal output next_hash[mimc_hash_size]; // Hash MiMCSponge
-  signal output phase1_output[state_size][2]; // Points
-  signal output phase2_dh_output[state_size][2]; // Points
-
-  signal output phase2_hidden_tags[state_size][2]; // Points
+  /* Sorties, qu'on accumule de même dans la chaîne
+     On vérifie par des contraintes qu'il s'agit bien du résultat produit */
+  signal phase1_output[state_size][2]; // Points
+  signal phase2_dh_output[state_size][2]; // Points
+  signal phase2_hidden_tags[state_size][2]; // Points
   // ^ Addition des points
-  signal output phase2_hidden_data[state_size][3][64]; // 64 Bits chacun
+  signal phase2_hidden_data[state_size][3][64]; // 64 Bits chacun
   // ^ XOR des data
+
+  var chain_len = mimc_hash_size // Le hash précédent
+    + state_size // Les dégâts reçus
+    + nb_villages // Les captures reçues (booléens)
+    + state_size * 2 // DH de phase 1 reçu par phase1_received
+    + nb_villages // Les villages qu'on capture (booléens)
+    + state_size * 2 // DH de phase 1 envoyé
+    + state_size * 2 // DH de phase 2 répondu
+    + state_size * 2 // Tags de la PSI
+    + state_size * 3 * 64 // Data de la PSI (booléens)
+    ;
 
   /* Vérifications de cohérence de l'état précédent */
   // Les rounds devraient être à 220 selon circomlib
@@ -190,7 +205,10 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   // Le papier confirme que MiMC fonctionne comme un hash pour
   // k = 0
   hash_prev.k <== 0;
-  prev_hash <== hash_prev.outs;
+  for (var i = 0; i < mimc_hash_size; i++) {
+    log(step_in[i], hash_prev.outs[i]);
+    step_in[i] === hash_prev.outs[i];
+  }
 
   /* Application des actions adverses */
   /* L'adversaire envoie des actions qui sont les contrats à ajouter.
@@ -394,7 +412,9 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   hash_next.ins[state_size * 4 + 1] <== etapes_misc[actions_size - 1][1];
   hash_next.ins[state_size * 4 + 2] <== etapes_misc[actions_size - 1][2];
   hash_next.k <== 0;
-  next_hash <== hash_next.outs;
+  for (var i = 0; i < mimc_hash_size; i++) {
+    step_out[i] <== hash_next.outs[i];
+  }
 
   /* Phase 2 de l´échange
   Une fois que l'adversaire nous a envoyé sa phase 1 au tour suivant, on termine
@@ -412,15 +432,74 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   phase2_dh_output <== phase2.phase2_dh_output;
   phase2_hidden_tags <== phase2.phase2_hidden_tags;
   phase2_hidden_data <== phase2.phase2_hidden_data;
+
+  /* Construction de la chaîne
+  Un peu simplifiée, si des optimisations sont faites devrait être comme voulu */
+  component chain = MiMCSponge(chain_len, 220, mimc_hash_size);
+  var offset = 0;
+  for (var i = 0; i < mimc_hash_size; i++) {
+    chain.ins[offset] <== step_in[mimc_hash_size + i];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.ins[offset] <== degats[i];
+    offset++;
+  }
+  for (var i = 0; i < nb_villages; i++) {
+    chain.ins[offset] <== captures[i];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.ins[offset] <== phase1_received[i][0];
+    offset++;
+    chain.ins[offset] <== phase1_received[i][1];
+    offset++;
+  }
+  for (var i = 0; i < nb_villages; i++) {
+    chain.ins[offset] <== actions_captures[i];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.ins[offset] <== phase1_output[i][0];
+    offset++;
+    chain.ins[offset] <== phase1_output[i][1];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.ins[offset] <== phase2_dh_output[i][0];
+    offset++;
+    chain.ins[offset] <== phase2_dh_output[i][1];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.ins[offset] <== phase2_hidden_tags[i][0];
+    offset++;
+    chain.ins[offset] <== phase2_hidden_tags[i][1];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    for (var j = 0; j < 3; j++) {
+      for (var k = 0; k < 64; k++) {
+        chain.ins[offset] <== phase2_hidden_data[i][j][k];
+        offset++;
+      }
+    }
+  }
+  chain.k <== 0;
+  for (var i = 0; i < mimc_hash_size; i++) {
+    step_out[mimc_hash_size + i] <== chain.outs[i];
+  }
 }
 
 // Plateau 10 x 10 avec 10 actions
 // 64 Bits de MiMC, lire plus dessus, 255 fait doubler la taille du circuit
+// 768202 contraintes avec Pedersen (marche pas au-delà de 100 cases)
+// Fait augmenter à 983014 ici, inquiétant la place prise
 
 // Les valeurs sont celles de la carte spéciale, qui ne se joue qu'avec les
 // nordiques pour les deux joueurs, avec un guerrier orc comme commandant,
 // et les troupes après 1 qui sont dans l'ordre proposé par le jeu
-component main {public [phase1_received, degats, captures, actions_captures]} =
+component main {public [step_in]} =
   Final(100, 10, 10, 10, 0, 1, 64,
   8, [50,90,5,45,54,94,9,49], // Villages
   9, // Troupes
