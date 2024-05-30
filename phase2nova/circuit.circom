@@ -156,7 +156,8 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   signal input phase1_exponents[state_size][254];
   signal input phase2_exponent[254];
 
-  // TODO: Prendre en entrée captures et actions_captures comme des entiers ?
+  // TODO: Prendre en entrée captures et actions_captures comme des entiers afin
+  // de baisser le nombre d'entrées ?
   /* Entrées publiques, qui sont accumulées dans la chaîne */
   // Actions adverses
   signal input degats[state_size];
