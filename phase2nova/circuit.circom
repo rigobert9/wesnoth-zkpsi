@@ -157,7 +157,7 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   signal input phase2_exponent[254];
 
   // TODO: Prendre en entrée captures et actions_captures comme des entiers afin
-  // de baisser le nombre d'entrées ?
+  // de baisser le nombre d'entrées mais augmenter la complexité ?
   /* Entrées publiques, qui sont accumulées dans la chaîne */
   // Actions adverses
   signal input degats[state_size];
@@ -204,7 +204,7 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
     ;
 
   /* Vérifications de cohérence de l'état précédent */
-  component hash_prev = AnemoiSponge127((state_size * 4) + 3);
+  component hash_prev = AnemoiSponge77((state_size * 4) + 3);
   for (var i = 0; i < state_size; i++) {
     hash_prev.in[i * 4 + 0] <== prev_state[i][0];
     hash_prev.in[i * 4 + 1] <== prev_state[i][1];
@@ -407,7 +407,7 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   }
 
   /* Vérifications de cohérence du nouvel état */
-  component hash_next = AnemoiSponge127((state_size * 4) + 3);
+  component hash_next = AnemoiSponge77((state_size * 4) + 3);
   for (var i = 0; i < state_size; i++) {
     hash_next.in[i * 4 + 0] <== etapes[actions_size - 1][i][0];
     hash_next.in[i * 4 + 1] <== etapes[actions_size - 1][i][1];
@@ -445,7 +445,7 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
 
   /* Construction de la chaîne
   Un peu simplifiée, si des optimisations sont faites devrait être comme voulu */
-  component chain = AnemoiSponge127(chain_len_compr);
+  component chain = AnemoiSponge77(chain_len_compr);
   var offset = 0;
   chain.in[offset] <== step_in[1];
   offset++;
@@ -497,8 +497,8 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
 }
 
 // Plateau 10 x 10 avec 10 actions
-// La fonction de hash est Anemoi-sponge avec 127 bits de sécurité (voir le
-// fichier)
+// La fonction de hash est Anemoi-sponge avec 77 bits de sécurité (voir le
+// fichier) (assez pour tenir 24h face à Frontier)
 
 // Les valeurs sont celles de la carte spéciale, qui ne se joue qu'avec les
 // nordiques pour les deux joueurs, avec un guerrier orc comme commandant,
