@@ -86,7 +86,7 @@ template Vision(state_size, state_height, state_width, max_radius) {
         }
       }
       // Résultat final du or dans out
-      out[(x * state_height) + y] <== interm_or[current_or - 1];
+      out[(x * state_width) + y] <== interm_or[current_or - 1];
       first_flag = 1;
     }
   }

@@ -48,8 +48,6 @@ Ya des implémentations in Circom et hors de Circom de Anemoi, the coolest kid o
 the block. Il pourra remplacer MiMC qui donne des résultats énormes.
 -> L'implémentation est pas hyper concluante
 
-Ya aussi des implémentations de Poseidon I guess...
-
 PRENDRE DES DONNÉES DE LA RÉDUCTION DE TAILLE, ET DE LA COMPLEXITÉ DE LA
 MACHINERIE (en contraintes linéaires et non linéaires, en taille de r1cs) !
 
@@ -73,4 +71,4 @@ et dans cet arrangement :
 - Les tags cachés pour la PSI (state_size * 2)
 - La data cachée pour la PSI (state_size * 3 * 64 booléens)
 
-Voir code.
+Voir code pour la construction exacte de la chaîne.

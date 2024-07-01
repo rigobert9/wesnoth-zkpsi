@@ -71,7 +71,7 @@ def write_input(filename) :
     hashed_idents_file = open('../phase1/output.txt')
     hashed_idents = [i.split() for i in hashed_idents_file.readlines()][:state_size]
     hashed_idents_file.close()
-    phase2_file = open('../../psi-wesnoth/output.txt')
+    phase2_file = open('../phase2nova/output.txt')
     phase2 = phase2_file.readlines()
     phase2_raw = [[num2bits(j) for j in i.split()] for i in phase2[2 * state_size:]]
     """

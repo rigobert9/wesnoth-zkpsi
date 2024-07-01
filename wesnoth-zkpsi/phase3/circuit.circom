@@ -104,4 +104,4 @@ template Final(state_size, enum_tag, enum_data) {
   }
 }
 
-component main = Final(100,0,1);
+component main = Final(10 * 10,0,1);

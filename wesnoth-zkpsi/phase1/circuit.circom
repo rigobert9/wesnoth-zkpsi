@@ -167,54 +167,8 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   phase1_output <-- phase1.phase1_output;
 }
 
-// Plateau 10 x 10 avec 10 actions
-// 64 Bits de MiMC, lire plus dessus, 255 fait doubler la taille du circuit
-// 768202 contraintes avec Pedersen (marche pas au-delà de 100 cases)
-// Fait augmenter à 983014 ici, inquiétant la place prise
-
-// Les valeurs sont celles de la carte spéciale, qui ne se joue qu'avec les
-// nordiques pour les deux joueurs, avec un guerrier orc comme commandant,
-// et les troupes après 1 qui sont dans l'ordre proposé par le jeu
-component main {public [degats, captures]} =
-  Final(100, 10, 10, 10, 0, 1, 64,
-  8, [50,90,5,45,54,94,9,49], // Villages
-  9, // Troupes
-    [0,58,32,26,33,38,42,32,18], // HP
-    [0,5,5,6,7,5,4,8,5], // Range
-    [0,-1,14,17,14,12,13,17,9], // Prix
-  2, [0, 99], // Donjons
-  6, [[0,1], [0,10], [0,20], [1,89], [1,98], [1,79]]); // Chateaux
 // template Final(state_size, state_height, state_width, actions_size, enum_tag, enum_data, mimc_hash_size,
 //   nb_villages, pos_villages, nb_troupes, hp_troupes, range_troupes, prix_troupes,
 //   nb_donjons, donjons, nb_chateaux, chateaux) {
 
-// Liste de coupables possibles
-/*
-- La vision (on peut probablement rien y faire)
-- L'accumulation des commits commutatifs
-- Les fonctions de hachage -> MiMC fait quelque chose de gros pour 10000, mais
-  qui est gérable quand même...
-- Les fonction ralentiraient la compilation ? PAS LE CAS
-*/
-
-// Bench pour la version avec MiMCSponge pour les gros hashs, et les commits
-// additifs en plus du calcul normal (pas si gros normalement), avec vision à 8
-// cases max et un seul type d'unités qui voient, 10 actions.
-/*
-Main                               | Templates | Contraintes | Temps de compilation
------------------------------------|-----------|-------------|---------------------
-Final(100, 10, 10, 10, 0, 1, 64)   | 6081      | 970854      | 1m6,857s
-Final(400, 20, 20, 10, 0, 1, 64)   | 44325     | 3635734     | 13m5,502s
-Final(1600, 40, 40, 10, 0, 1, 64)  | 44323     | 3024574     | 40m33,657s
-*/
-
-// TODO: Choisir le hash et vérifier pour des plus grandes maps
-// TODO: Adapter à Wesnoth, en faisant une map moddée, et avec des actions
-// intelligentes et une vision conforme
-// TODO: Calculs (adaptés de ce fichier une fois fini)
-// TODO: Test au moins sur le prototype la PSI à partir des calculs
-// TODO: Mod BosWars et aussi adapter pour lui pour le test RTS
-// TODO: Optimisations : PSI updatable, NOVA, Meilleurs hashs, gestion des
-// "actions publiques" ...
-// TODO: Version MPC !
-// TODO: Réutiliser les calculs dans le witness final ?
+component main {public [degats, captures]} = Final(10 * 10, 10, 10 , 10, 0, 1, 64, 8, [50,90,5,45,54,94,9,49], 9, [0,58,32,26,33,38,42,32,18], [0,5,5,6,7,5,4,8,5], [0,-1,14,17,14,12,13,17,9], 2, [0, 99], 6, [[0,1], [0,10], [0,20], [1,89], [1,98], [1,79]]);

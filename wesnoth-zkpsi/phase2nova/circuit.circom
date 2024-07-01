@@ -1,43 +1,10 @@
 pragma circom 2.1.8;
 
-// Circomlib
-include "mimcsponge.circom";
 // Modules
 include "functions.circom";
 include "regles.circom";
 include "exchange.circom";
-
-// Commande finale : compilation
-// Penser à utiliser le flag -l pour aller chercher circomlib !
-// Tout V :
-// circom -l ../circomlib/circuits circuit.circom --r1cs --wasm --sym --c
-// Actuelle V :
-// circom -l ../circomlib/circuits circuit.circom --r1cs --sym --c
-// Commande finale : calcul de témoin et passage vers json
-// snarkjs wc circuit_js/circuit.wasm input.json witness.wtns && snarkjs wej witness.wtns witness.json
-// Commande finale : vérification de témoin
-// snarkjs wchk circuit.r1cs witness.wtns
-// Ce témoin nous permet de réaliser les calculs
-
-// Pour le setup, les trusted strings sont ici
-// https://github.com/iden3/snarkjs?tab=readme-ov-file#7-prepare-phase-2
-// J'en utilise un pour 1M contraintes max puisqu'on en a pour l'instant 725282
-// Ensuite on run
-// snarkjs plonk setup circuit.r1cs [trusted_setup].ptau circuit_final.zkey
-// snarkjs zkey export verificationkey circuit_final.zkey verification_key.json
-
-// ^ Bon, ça marche pas, fallback vers Groth, pour lequel il faut un setup
-// supplémentaire sur la clé, le setup a pris 30 minutes damn.
-
-// Et enfin on fait la preuve
-// snarkjs plonk prove circuit_final.zkey witness.wtns proof.json public.json
-// Et on la vérifie
-// snarkjs plonk verify verification_key.json public.json proof.json
-
-// Pour la mise à jour de la vision à chaque mouvement, il faudrait faire du
-// mouvement-par-mouvement...
-// En attendant, il convient de jouer avec l'option "différer la mise à jour du
-// voile"
+include "sponge.circom";
 
 /* Système de règles
 Chaque case contient les informations suivantes :
@@ -128,12 +95,19 @@ prix de la troupe pour la faire apparaître sur la case, à full health et qui n
 peut pas bouger.
 */
 
-template Final(state_size, state_height, state_width, actions_size, enum_tag, enum_data, mimc_hash_size,
+template Final(state_size, state_height, state_width, actions_size, enum_tag, enum_data,
   nb_villages, pos_villages, nb_troupes, hp_troupes, range_troupes, prix_troupes,
   nb_donjons, donjons, nb_chateaux, chateaux) {
   assert(state_size == state_height * state_width);
   var max_radius = tabmax(nb_troupes, range_troupes);
   // La troupe 1 correspond au chef
+
+  // Les deux entrées sont
+  // - le hash de l'état actuel
+  // - la chaîne actuelle
+  // Le hash est seulement long de un
+  signal input step_in[2];
+  signal output step_out[2];
 
   /* Entrées qui seront privées
   * Chaque case contient les informations suivantes :
@@ -142,13 +116,22 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   * [argent_possede, villages_possédés, upkeep_accumulé] */
   signal input prev_state[state_size][4];
   signal input prev_misc_state[3];
-  // Actions adverses
-  signal input degats[state_size];
-  signal input captures[nb_villages];
   // 10 actions avec l'encodage
   // Le batching d'actions est fait dans ce prototype, à voir s'il est conservé
   // dans l'un ou l'autre des jeux
   signal input actions[actions_size][8];
+  // En binaire, inversibles de l'ordre de la courbe
+  signal input phase1_exponents[state_size][254];
+  signal input phase2_exponent[254];
+
+  // TODO: Prendre en entrée captures et actions_captures comme des entiers afin
+  // de baisser le nombre d'entrées ?
+  /* Entrées publiques, qui sont accumulées dans la chaîne */
+  // Actions adverses
+  signal input degats[state_size];
+  signal input captures[nb_villages];
+  /* Entrées adverses publiques */
+  signal input phase1_received[state_size][2]; // Points
   /* On peut faire confiance aux joueurs pour énoncer les villages possédés par
    * l'adversaire qu'ils capturent : en effet, s'ils l'énoncent alors que
    * l'adversaire ne l'a pas, il font fuir de l'information; s'ils ne l'énoncent
@@ -156,41 +139,50 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
    * ce village.*/
    // On doit donc vérifier que les éléments de ce tableau sont bien capturés
   signal input actions_captures[nb_villages];
-  // En binaire, inversibles de l'ordre de la courbe
-  signal input phase1_exponents[state_size][254];
-  signal input phase2_exponent[254];
-
-  /* Entrées adverses publiques */
-  signal input phase1_received[state_size][2]; // Points
-
-  /* Sorties contre lesquelles sont mesurées les résultats */
-  // TODO: CHOISIR TAILLE MIMC !
-  signal output prev_hash[mimc_hash_size]; // Hash MiMCSponge
-  signal output next_hash[mimc_hash_size]; // Hash MiMCSponge
-  signal output phase1_output[state_size][2]; // Points
-  signal output phase2_dh_output[state_size][2]; // Points
-
-  signal output phase2_hidden_tags[state_size][2]; // Points
+  /* Sorties, qu'on accumule de même dans la chaîne
+     On vérifie par des contraintes qu'il s'agit bien du résultat produit */
+  signal phase1_output[state_size][2]; // Points
+  signal phase2_dh_output[state_size][2]; // Points
+  signal phase2_hidden_tags[state_size][2]; // Points
   // ^ Addition des points
-  signal output phase2_hidden_data[state_size][3][64]; // 64 Bits chacun
+  signal phase2_hidden_data[state_size][3][64]; // 64 Bits chacun
   // ^ XOR des data
 
+  var chain_len = 1 // Le hash précédent
+    + state_size // Les dégâts reçus
+    + nb_villages // Les captures reçues (booléens)
+    + state_size * 2 // DH de phase 1 reçu par phase1_received
+    + nb_villages // Les villages qu'on capture (booléens)
+    + state_size * 2 // DH de phase 1 envoyé
+    + state_size * 2 // DH de phase 2 répondu
+    + state_size * 2 // Tags de la PSI
+    + state_size * 3 * 64 // Data de la PSI (booléens)
+    ;
+
+  // Version compressée en passant des booléen aux entiers
+  var chain_len_compr = 1 // Le hash précédent
+    + state_size // Les dégâts reçus
+    + 1 // Les captures reçues (booléens)
+    + state_size * 2 // DH de phase 1 reçu par phase1_received
+    + 1 // Les villages qu'on capture (booléens)
+    + state_size * 2 // DH de phase 1 envoyé
+    + state_size * 2 // DH de phase 2 répondu
+    + state_size * 2 // Tags de la PSI
+    + state_size * 1 // Data de la PSI (booléens)
+    ;
+
   /* Vérifications de cohérence de l'état précédent */
-  // Les rounds devraient être à 220 selon circomlib
-  component hash_prev = MiMCSponge((state_size * 4) + 3, 220, mimc_hash_size);
+  component hash_prev = AnemoiSponge127((state_size * 4) + 3);
   for (var i = 0; i < state_size; i++) {
-    hash_prev.ins[i * 4 + 0] <== prev_state[i][0];
-    hash_prev.ins[i * 4 + 1] <== prev_state[i][1];
-    hash_prev.ins[i * 4 + 2] <== prev_state[i][2];
-    hash_prev.ins[i * 4 + 3] <== prev_state[i][3];
+    hash_prev.in[i * 4 + 0] <== prev_state[i][0];
+    hash_prev.in[i * 4 + 1] <== prev_state[i][1];
+    hash_prev.in[i * 4 + 2] <== prev_state[i][2];
+    hash_prev.in[i * 4 + 3] <== prev_state[i][3];
   }
-  hash_prev.ins[state_size * 4 + 0] <== prev_misc_state[0];
-  hash_prev.ins[state_size * 4 + 1] <== prev_misc_state[1];
-  hash_prev.ins[state_size * 4 + 2] <== prev_misc_state[2];
-  // Le papier confirme que MiMC fonctionne comme un hash pour
-  // k = 0
-  hash_prev.k <== 0;
-  prev_hash <== hash_prev.outs;
+  hash_prev.in[state_size * 4 + 0] <== prev_misc_state[0];
+  hash_prev.in[state_size * 4 + 1] <== prev_misc_state[1];
+  hash_prev.in[state_size * 4 + 2] <== prev_misc_state[2];
+  step_in[0] === hash_prev.out;
 
   /* Application des actions adverses */
   /* L'adversaire envoie des actions qui sont les contrats à ajouter.
@@ -383,18 +375,17 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   }
 
   /* Vérifications de cohérence du nouvel état */
-  component hash_next = MiMCSponge((state_size * 4) + 3, 220, mimc_hash_size);
+  component hash_next = AnemoiSponge127((state_size * 4) + 3);
   for (var i = 0; i < state_size; i++) {
-    hash_next.ins[i * 4 + 0] <== etapes[actions_size - 1][i][0];
-    hash_next.ins[i * 4 + 1] <== etapes[actions_size - 1][i][1];
-    hash_next.ins[i * 4 + 2] <== etapes[actions_size - 1][i][2];
-    hash_next.ins[i * 4 + 3] <== etapes[actions_size - 1][i][3];
+    hash_next.in[i * 4 + 0] <== etapes[actions_size - 1][i][0];
+    hash_next.in[i * 4 + 1] <== etapes[actions_size - 1][i][1];
+    hash_next.in[i * 4 + 2] <== etapes[actions_size - 1][i][2];
+    hash_next.in[i * 4 + 3] <== etapes[actions_size - 1][i][3];
   }
-  hash_next.ins[state_size * 4 + 0] <== etapes_misc[actions_size - 1][0];
-  hash_next.ins[state_size * 4 + 1] <== etapes_misc[actions_size - 1][1];
-  hash_next.ins[state_size * 4 + 2] <== etapes_misc[actions_size - 1][2];
-  hash_next.k <== 0;
-  next_hash <== hash_next.outs;
+  hash_next.in[state_size * 4 + 0] <== etapes_misc[actions_size - 1][0];
+  hash_next.in[state_size * 4 + 1] <== etapes_misc[actions_size - 1][1];
+  hash_next.in[state_size * 4 + 2] <== etapes_misc[actions_size - 1][2];
+  step_out[0] <== hash_next.out;
 
   /* Phase 2 de l´échange
   Une fois que l'adversaire nous a envoyé sa phase 1 au tour suivant, on termine
@@ -412,34 +403,69 @@ template Final(state_size, state_height, state_width, actions_size, enum_tag, en
   phase2_dh_output <== phase2.phase2_dh_output;
   phase2_hidden_tags <== phase2.phase2_hidden_tags;
   phase2_hidden_data <== phase2.phase2_hidden_data;
+
+  // TODO: Attention, ces compressions sont valides uniquement pour nb_villages
+  // < 254
+  component captures_compr = Bits2Num(nb_villages);
+  captures_compr.in <== captures;
+  component actions_captures_compr = Bits2Num(nb_villages);
+  actions_captures_compr.in <== actions_captures;
+
+  /* Construction de la chaîne
+  Un peu simplifiée, si des optimisations sont faites devrait être comme voulu */
+  component chain = AnemoiSponge127(chain_len_compr);
+  var offset = 0;
+  chain.in[offset] <== step_in[1];
+  offset++;
+  for (var i = 0; i < state_size; i++) {
+    chain.in[offset] <== degats[i];
+    offset++;
+  }
+  chain.in[offset] <== captures_compr.out;
+  offset++;
+  for (var i = 0; i < state_size; i++) {
+    chain.in[offset] <== phase1_received[i][0];
+    offset++;
+    chain.in[offset] <== phase1_received[i][1];
+    offset++;
+  }
+  chain.in[offset] <== actions_captures_compr.out;
+  offset++;
+  for (var i = 0; i < state_size; i++) {
+    chain.in[offset] <== phase1_output[i][0];
+    offset++;
+    chain.in[offset] <== phase1_output[i][1];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.in[offset] <== phase2_dh_output[i][0];
+    offset++;
+    chain.in[offset] <== phase2_dh_output[i][1];
+    offset++;
+  }
+  for (var i = 0; i < state_size; i++) {
+    chain.in[offset] <== phase2_hidden_tags[i][0];
+    offset++;
+    chain.in[offset] <== phase2_hidden_tags[i][1];
+    offset++;
+  }
+  component phase2_hidden_data_compr[state_size];
+  for (var i = 0; i < state_size; i++) {
+    phase2_hidden_data_compr[i] = Bits2Num(64 * 3);
+    for (var j = 0; j < 3; j++) {
+      for (var k = 0; k < 64; k++) {
+        phase2_hidden_data_compr[i].in[(j * 64) + k] <== phase2_hidden_data[i][j][k];
+      }
+    }
+    chain.in[offset] <== phase2_hidden_data_compr[i].out;
+    offset++;
+  }
+
+  step_out[1] <== chain.out;
 }
 
-// Plateau 10 x 10 avec 10 actions
-// 64 Bits de MiMC, lire plus dessus, 255 fait doubler la taille du circuit
-
-// Les valeurs sont celles de la carte spéciale, qui ne se joue qu'avec les
-// nordiques pour les deux joueurs, avec un guerrier orc comme commandant,
-// et les troupes après 1 qui sont dans l'ordre proposé par le jeu
-component main {public [phase1_received, degats, captures, actions_captures]} =
-  Final(100, 10, 10, 10, 0, 1, 64,
-  8, [50,90,5,45,54,94,9,49], // Villages
-  9, // Troupes
-    [0,58,32,26,33,38,42,32,18], // HP
-    [0,5,5,6,7,5,4,8,5], // Range
-    [0,-1,14,17,14,12,13,17,9], // Prix
-  2, [0, 99], // Donjons
-  6, [[0,1], [0,10], [0,20], [1,89], [1,98], [1,79]]); // Chateaux
-// template Final(state_size, state_height, state_width, actions_size, enum_tag, enum_data, mimc_hash_size,
+// template Final(state_size, state_height, state_width, actions_size, enum_tag, enum_data,
 //   nb_villages, pos_villages, nb_troupes, hp_troupes, range_troupes, prix_troupes,
 //   nb_donjons, donjons, nb_chateaux, chateaux) {
 
-// TODO: Choisir le hash et vérifier pour des plus grandes maps
-// TODO: Adapter à Wesnoth, en faisant une map moddée, et avec des actions
-// intelligentes et une vision conforme
-// TODO: Mod BosWars et aussi adapter pour lui pour le test RTS
-// TODO: Optimisations : PSI updatable, NOVA, Meilleurs hashs, gestion des
-// "actions publiques" ...
-// TODO: Version MPC !
-// TODO: Réutiliser les calculs dans le witness final ?
-// TODO: Améliorer les hashes : il y a plein de candidats expérimentaux
-// Cf https://www.zellic.io/blog/zk-friendly-hash-functions
+component main {public [step_in]} = Final(10 * 10, 10, 10, 10, 0, 1, 8, [50,90,5,45,54,94,9,49], 9, [0,58,32,26,33,38,42,32,18], [0,5,5,6,7,5,4,8,5], [0,-1,14,17,14,12,13,17,9], 2, [0, 99], 6, [[0,1], [0,10], [0,20], [1,89], [1,98], [1,79]]);

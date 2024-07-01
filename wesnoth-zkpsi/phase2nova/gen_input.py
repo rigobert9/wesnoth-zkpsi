@@ -57,7 +57,7 @@ def impairer(elt):
 
 # Le hash de la position de départ et des misc, suivie de sa copie pour remplacer le contenu
 # de l'accumulateur
-initial_hash = ["12396517484807485029748036342867896936797751961982885378204088006561136216347"] * 2
+initial_hash = ["12396517484807485029748036342867896936797751961982885378204088006561136216347","0"]
 
 
 def write_input(filename, expfilename, prev_state, prev_misc_state, actions, degats,
