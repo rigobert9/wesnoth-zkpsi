@@ -19,10 +19,18 @@ Afin d'éviter de générer des preuves à chaque tour, les joueurs peuvent à l
 place les accumuler grâce à Nova, et envoient une preuve qui fait foi pour toute
 la partie lorsque l'adversaire la demande.
 
-TODO: Description du protocole (préciser qu'on update le fog of war seulement au
-début du tour !!!)
+Au tour d'Alice :
+- Alice réalise une intersection privée d'ensemble et obtient ce qu'elle peut
+  voir (ce qui correspond à l'option *Delay fog update*, sans quoi il faudrait
+  répéter à chaque action)
+- Alice choisit son coup
+- Pendant ce temps, Bob accumule dans sa preuve Nova une preuve de son honnêteté
+  dans : ses actions au dernier tour, son envoi de PSI au dernier tour, et son
+  envoi pour la PSI de ce tour
+- Bob envoie, si elle le demande, la preuve à Alice
+- Alice passe la main
 
-IMAGE
+![Diagramme du protocole décrit ci-dessus](protocole.png)
 
 ## Structure de l'implémentation
 Afin d'assurer la cohérence des calculs sans avoir à réécrire le programme, les
